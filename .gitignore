@@ -5,6 +5,7 @@ src/__pycache__/
 
 Data/
 data/
+raw_data/
 
 Debug/
 debug/
