@@ -1,3 +1,8 @@
 Data/
 Debug/
 .ipynb_checkpoints/
+.venv/
+*.deb
+*.Identifier
+raw_data/
+dataset/
