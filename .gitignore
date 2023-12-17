@@ -6,6 +6,14 @@ src/__pycache__/
 Data/
 data/
 raw_data/
+dataset/
+
+data.json
 
 Debug/
 debug/
+
+.ipynb_checkpoints/
+.venv/
+*.deb
+*.Identifier
