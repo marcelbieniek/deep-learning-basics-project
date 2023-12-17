@@ -9,6 +9,10 @@ import os
 import shutil
 import posixpath
 import re
+import random
+import math
+import json
+import librosa
 
 class DatasetManager:
     """
@@ -18,9 +22,15 @@ class DatasetManager:
     Output format for album names is also snake case: album_name
     """
 
-    def __init__(self, path: str):
+    def __init__(self, path: str, segments_amount_per_track: int, segment_duration_in_s: int):
         self._path = path
-        self._artists = dict()
+        self._dataset_path = "../dataset/"
+        self._dataset_json_path = "../dataset/data.json"
+        self._segment_duration_in_s = segment_duration_in_s
+        self._segments_per_track = segments_amount_per_track
+        self._songs_per_artist = dict()
+        self._artists_songs = dict()
+        self._chosen_songs = dict()
         self._songs_to_take_per_artist = -1
 
 
@@ -36,7 +46,7 @@ class DatasetManager:
         """
         Get dictionary containing artists names and their songs count
         """
-        return self._artists
+        return self._songs_per_artist
 
 
     def create_dataset(self):
@@ -49,9 +59,11 @@ class DatasetManager:
         """
         self._sanitaze_names()
         self._move()
-        self._remove_directory(self._path)
+        self._remove_directories_without_songs(self._path)
+        self._save_artists_songs_paths()
         self._count_songs_per_artist()
         self._minimum_songs_per_artists()
+        self._create_dataset()
 
 
     def _sanitaze_names(self):
@@ -204,19 +216,19 @@ class DatasetManager:
                 os.remove(old_path)
 
 
-    def _remove_directory(self, path: str):
+    def _remove_directories_without_songs(self, path: str):
         item_path = self._convert_backslashes_to_forward_slashes(path)
         items = os.listdir(item_path)
         for item in items:
             item_path = posixpath.join(path, item)
             if os.path.isdir(item_path):
-                self._remove_directory(item_path)
+                self._remove_directories_without_songs(item_path)
                 content = os.listdir(item_path)
-                if not self._check_if_mp3_in_directory(content):
+                if not self._check_if_any_mp3_in_directory(content):
                     shutil.rmtree(item_path)
 
 
-    def _check_if_mp3_in_directory(self, directory_content: list) -> bool:
+    def _check_if_any_mp3_in_directory(self, directory_content: list) -> bool:
         is_mp3_in_directory_content = False
         for item in directory_content:
             if self._check_if_mp3(item):
@@ -226,15 +238,112 @@ class DatasetManager:
         return is_mp3_in_directory_content
 
 
+    def _save_artists_songs_paths(self):
+        sanitized_path = self._convert_backslashes_to_forward_slashes(self._path)
+        for root, _, files in os.walk(sanitized_path):
+            root = self._convert_backslashes_to_forward_slashes(root)
+            directory_name = self._get_name(root)
+            if len(directory_name) != 0:
+                self._artists_songs[directory_name] = list()
+                for file in files:
+                    path = root + "/" + file
+                    self._artists_songs[directory_name].append(path)
+
+
     def _count_songs_per_artist(self):
         sanitized_path = self._convert_backslashes_to_forward_slashes(self._path)
         for root, _, files in os.walk(sanitized_path):
             root = self._convert_backslashes_to_forward_slashes(root)
             directory_name = self._get_name(root)
             if len(directory_name) != 0:
-                self._artists[directory_name] = len(files)
+                self._songs_per_artist[directory_name] = len(files)
 
 
     def _minimum_songs_per_artists(self):
-        self._songs_to_take_per_artist = min(self._artists.values())
-        print(self._songs_to_take_per_artist)
+        self._songs_to_take_per_artist = min(self._songs_per_artist.values())
+
+
+    def _create_dataset(self):
+        self._chose_random_artist_songs()
+        self._create_new_directory(self._dataset_path)
+        self._take_random_samples_from_songs()
+
+
+    def _chose_random_artist_songs(self):
+        for artist, songs in self._artists_songs.items():
+            self._chosen_songs[artist] = random.sample(songs, self._songs_to_take_per_artist)
+
+
+    def _create_new_directory(self, path: str):
+        if not os.path.exists(path):
+            os.makedirs(path)
+
+
+    def _take_random_samples_from_songs(self):
+        data = {
+            "mapping": [], # different artist labels
+            "mfcc": [], # training inputs
+            "labels": [] # outputs, targets
+        }
+
+        n_mfcc = 13
+        n_fft = 2048
+        hop_length = 512
+
+        sanitized_path = self._convert_backslashes_to_forward_slashes(self._path)
+        for it, (root, _, _) in enumerate(os.walk(sanitized_path)):
+            if root == self._path:
+                continue
+            artist = self._get_name(root)
+            data["mapping"].append(artist)
+
+            for i in range(self._songs_to_take_per_artist):
+                print(self._chosen_songs[artist][i])
+                signal, sr = librosa.load(self._chosen_songs[artist][i])
+                track_duration = librosa.get_duration(
+                    y=signal,
+                    sr=sr,
+                    n_fft=n_fft,
+                    hop_length=hop_length
+                )
+
+                num_samples = int(sr * track_duration)
+                num_samples_per_segment = int(sr * self._segment_duration_in_s)
+                num_mfcc_vectors_in_segment = math.ceil(num_samples_per_segment / hop_length)
+
+                for _ in range(self._segments_per_track):
+                    # choose start point
+                    segment_start = random.randint(0, num_samples)
+                    # calculate end point
+                    segment_end = segment_start + num_samples_per_segment
+                    if segment_end > num_samples:
+                        segment_start = segment_start - num_samples_per_segment
+                        segment_end = segment_end - num_samples_per_segment
+
+                    mfcc = librosa.feature.mfcc(
+                        y=signal[segment_start:segment_end],
+                        sr=sr,
+                        n_mfcc=n_mfcc,
+                        n_fft=n_fft,
+                        hop_length=hop_length
+                    )
+                    mfcc = mfcc.T
+
+                    # save results and check expected length
+                    if len(mfcc) == num_mfcc_vectors_in_segment:
+                        data["mfcc"].append(mfcc.tolist()) #np array -> list
+                        data["labels"].append(it - 1)
+                    else:
+                        print("length does not match expected!")
+
+        print("Saving into .json file")
+        with open(self._dataset_json_path, "w", encoding="utf-8") as file:
+            json.dump(data, file, indent=4)
+
+
+
+# data_path = "./data/"
+# segments_amount = 10
+# sample_duration_in_s = 5
+# dataset_manager = DatasetManager(data_path, segments_amount, sample_duration_in_s)
+# dataset_manager.create_dataset()
