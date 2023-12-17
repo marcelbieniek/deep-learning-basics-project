@@ -1,7 +1,7 @@
 .ipynb_checkpoints/
 
 __pycache__/
-src/__pycache__/
+creating_dataset_app/__pycache__/
 
 Data/
 data/
