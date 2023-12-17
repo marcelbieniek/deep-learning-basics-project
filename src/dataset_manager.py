@@ -339,11 +339,3 @@ class DatasetManager:
         print("Saving into .json file")
         with open(self._dataset_json_path, "w", encoding="utf-8") as file:
             json.dump(data, file, indent=4)
-
-
-
-# data_path = "./data/"
-# segments_amount = 10
-# sample_duration_in_s = 5
-# dataset_manager = DatasetManager(data_path, segments_amount, sample_duration_in_s)
-# dataset_manager.create_dataset()
